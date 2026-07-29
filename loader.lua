@@ -38,7 +38,7 @@ local function urlEncode(s)
     end))
 end
 
-local gamelistUrl = "https://ponggohub.netlify.app/gamelist.lua"
+local gamelistUrl = "https://raw.githubusercontent.com/dzikrnshdjafar/ponggo-hub/main/gamelist.lua"
 if username ~= "" then
     gamelistUrl = gamelistUrl .. "?u=" .. urlEncode(username)
 end
