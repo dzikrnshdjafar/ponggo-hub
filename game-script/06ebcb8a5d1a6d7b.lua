@@ -21,6 +21,10 @@ ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
 -- Variables for UI State
 local isOpen = true
 local allItems = {}
+local autoListEnabled = false
+local selectedPetType = "Any"
+local notifiedListings = {}
+local autoListLoopActive = false
 
 -- Helper to create rounded corners
 local function addCorner(parent, radius)
@@ -71,8 +75,8 @@ addGradient(ToggleButton, Color3.fromRGB(138, 35, 135), Color3.fromRGB(233, 64, 
 -- Main GUI Frame
 local MainFrame = Instance.new("Frame")
 MainFrame.Name = "MainFrame"
-MainFrame.Size = UDim2.new(0, 420, 0, 480)
-MainFrame.Position = UDim2.new(0.5, -210, 0.5, -240)
+MainFrame.Size = UDim2.new(0, 420, 0, 600)
+MainFrame.Position = UDim2.new(0.5, -210, 0.5, -300)
 MainFrame.BackgroundColor3 = Color3.fromRGB(18, 18, 24)
 MainFrame.Active = true
 MainFrame.Draggable = true -- Enable drag & drop for the window
@@ -137,11 +141,161 @@ CloseBtn.Font = Enum.Font.GothamBold
 CloseBtn.Parent = TitleBar
 addCorner(CloseBtn, 6)
 
+-- Pet Finder Container (Settings Panel)
+local PetFinderPanel = Instance.new("Frame")
+PetFinderPanel.Name = "PetFinderPanel"
+PetFinderPanel.Size = UDim2.new(1, -30, 0, 130)
+PetFinderPanel.Position = UDim2.new(0, 15, 0, 55)
+PetFinderPanel.BackgroundColor3 = Color3.fromRGB(24, 24, 34)
+PetFinderPanel.Parent = MainFrame
+addCorner(PetFinderPanel, 8)
+addStroke(PetFinderPanel, Color3.fromRGB(255, 255, 255), 1, 0.95)
+
+-- Toggle Button for Auto List
+local ToggleAutoListBtn = Instance.new("TextButton")
+ToggleAutoListBtn.Name = "ToggleAutoListBtn"
+ToggleAutoListBtn.Size = UDim2.new(0, 180, 0, 30)
+ToggleAutoListBtn.Position = UDim2.new(0, 10, 0, 10)
+ToggleAutoListBtn.BackgroundColor3 = Color3.fromRGB(233, 64, 87) -- Starts Off (Red)
+ToggleAutoListBtn.Text = "Auto List Pets: OFF"
+ToggleAutoListBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+ToggleAutoListBtn.TextSize = 12
+ToggleAutoListBtn.Font = Enum.Font.GothamBold
+ToggleAutoListBtn.Parent = PetFinderPanel
+addCorner(ToggleAutoListBtn, 6)
+
+-- Max Price Input
+local MaxPriceInput = Instance.new("TextBox")
+MaxPriceInput.Name = "MaxPriceInput"
+MaxPriceInput.Size = UDim2.new(0, 180, 0, 30)
+MaxPriceInput.Position = UDim2.new(1, -190, 0, 10)
+MaxPriceInput.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MaxPriceInput.PlaceholderText = "Max Price (Tokens)"
+MaxPriceInput.Text = ""
+MaxPriceInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+MaxPriceInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
+MaxPriceInput.TextSize = 12
+MaxPriceInput.Font = Enum.Font.Gotham
+MaxPriceInput.Parent = PetFinderPanel
+addCorner(MaxPriceInput, 6)
+addStroke(MaxPriceInput, Color3.fromRGB(255, 255, 255), 1, 0.95)
+
+-- Dropdown Button for Pet Type
+local DropdownBtn = Instance.new("TextButton")
+DropdownBtn.Name = "DropdownBtn"
+DropdownBtn.Size = UDim2.new(0, 180, 0, 30)
+DropdownBtn.Position = UDim2.new(0, 10, 0, 50)
+DropdownBtn.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+DropdownBtn.Text = "Pet Type: Any"
+DropdownBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+DropdownBtn.TextSize = 12
+DropdownBtn.Font = Enum.Font.GothamBold
+DropdownBtn.Parent = PetFinderPanel
+addCorner(DropdownBtn, 6)
+addStroke(DropdownBtn, Color3.fromRGB(255, 255, 255), 1, 0.9)
+
+-- Dropdown Scrolling Frame Menu
+local DropdownMenu = Instance.new("ScrollingFrame")
+DropdownMenu.Name = "DropdownMenu"
+DropdownMenu.Size = UDim2.new(0, 180, 0, 150)
+DropdownMenu.Position = UDim2.new(0, 10, 0, 85)
+DropdownMenu.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
+DropdownMenu.BorderSizePixel = 0
+DropdownMenu.ZIndex = 20
+DropdownMenu.Visible = false
+DropdownMenu.ScrollBarThickness = 4
+DropdownMenu.ScrollBarImageColor3 = Color3.fromRGB(138, 35, 135)
+DropdownMenu.Parent = PetFinderPanel
+addCorner(DropdownMenu, 6)
+addStroke(DropdownMenu, Color3.fromRGB(138, 35, 135), 1, 0.7)
+
+local DropdownLayout = Instance.new("UIListLayout")
+DropdownLayout.Padding = UDim.new(0, 4)
+DropdownLayout.Parent = DropdownMenu
+
+DropdownLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+    DropdownMenu.CanvasSize = UDim2.new(0, 0, 0, DropdownLayout.AbsoluteContentSize.Y + 6)
+end)
+
+-- Min Weight Input
+local MinWeightInput = Instance.new("TextBox")
+MinWeightInput.Name = "MinWeightInput"
+MinWeightInput.Size = UDim2.new(0, 85, 0, 30)
+MinWeightInput.Position = UDim2.new(1, -190, 0, 50)
+MinWeightInput.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MinWeightInput.PlaceholderText = "Min Wt"
+MinWeightInput.Text = ""
+MinWeightInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+MinWeightInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
+MinWeightInput.TextSize = 12
+MinWeightInput.Font = Enum.Font.Gotham
+MinWeightInput.Parent = PetFinderPanel
+addCorner(MinWeightInput, 6)
+addStroke(MinWeightInput, Color3.fromRGB(255, 255, 255), 1, 0.95)
+
+-- Max Weight Input
+local MaxWeightInput = Instance.new("TextBox")
+MaxWeightInput.Name = "MaxWeightInput"
+MaxWeightInput.Size = UDim2.new(0, 85, 0, 30)
+MaxWeightInput.Position = UDim2.new(1, -95, 0, 50)
+MaxWeightInput.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
+MaxWeightInput.PlaceholderText = "Max Wt"
+MaxWeightInput.Text = ""
+MaxWeightInput.TextColor3 = Color3.fromRGB(255, 255, 255)
+MaxWeightInput.PlaceholderColor3 = Color3.fromRGB(100, 100, 120)
+MaxWeightInput.TextSize = 12
+MaxWeightInput.Font = Enum.Font.Gotham
+MaxWeightInput.Parent = PetFinderPanel
+addCorner(MaxWeightInput, 6)
+addStroke(MaxWeightInput, Color3.fromRGB(255, 255, 255), 1, 0.95)
+
+-- Auto List Status Label
+local StatusLabel = Instance.new("TextLabel")
+StatusLabel.Name = "StatusLabel"
+StatusLabel.Size = UDim2.new(1, -20, 0, 25)
+StatusLabel.Position = UDim2.new(0, 10, 0, 95)
+StatusLabel.BackgroundTransparency = 1
+StatusLabel.Text = "Status: Idle"
+StatusLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
+StatusLabel.TextSize = 11
+StatusLabel.Font = Enum.Font.GothamBold
+StatusLabel.Parent = PetFinderPanel
+
+-- Populate Dropdown List
+local petTypes = {"Any", "Orange Tabby", "Rooster", "Pig", "Cow", "Sheep", "Chicken", "Bunny", "Goat", "Cat", "Dog", "Axolotl", "Duck", "Frog", "Bee", "Turtle"}
+
+for _, petType in ipairs(petTypes) do
+    local btn = Instance.new("TextButton")
+    btn.Size = UDim2.new(1, 0, 0, 28)
+    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    btn.Text = petType
+    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+    btn.Font = Enum.Font.Gotham
+    btn.TextSize = 12
+    btn.ZIndex = 25
+    btn.Parent = DropdownMenu
+    addCorner(btn, 4)
+    
+    btn.MouseEnter:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(138, 35, 135)
+    end)
+    btn.MouseLeave:Connect(function()
+        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+    end)
+    
+    btn.MouseButton1Click:Connect(function()
+        selectedPetType = petType
+        DropdownBtn.Text = "Pet Type: " .. petType
+        DropdownMenu.Visible = false
+        scanBooths()
+    end)
+end
+
 -- Search Bar Container
 local SearchContainer = Instance.new("Frame")
 SearchContainer.Name = "SearchContainer"
 SearchContainer.Size = UDim2.new(1, -30, 0, 36)
-SearchContainer.Position = UDim2.new(0, 15, 0, 60)
+SearchContainer.Position = UDim2.new(0, 15, 0, 195)
 SearchContainer.BackgroundColor3 = Color3.fromRGB(25, 25, 35)
 SearchContainer.Parent = MainFrame
 addCorner(SearchContainer, 8)
@@ -165,8 +319,8 @@ SearchInput.Parent = SearchContainer
 -- Items ScrollingFrame Container
 local ScrollFrame = Instance.new("ScrollingFrame")
 ScrollFrame.Name = "ItemsScroll"
-ScrollFrame.Size = UDim2.new(1, -30, 1, -120)
-ScrollFrame.Position = UDim2.new(0, 15, 0, 105)
+ScrollFrame.Size = UDim2.new(1, -30, 1, -255)
+ScrollFrame.Position = UDim2.new(0, 15, 0, 240)
 ScrollFrame.BackgroundTransparency = 1
 ScrollFrame.ScrollBarThickness = 4
 ScrollFrame.ScrollBarImageColor3 = Color3.fromRGB(138, 35, 135)
@@ -186,7 +340,6 @@ end)
 
 -- Find Booths Folder in Workspace
 local function getBoothsFolder()
-    -- Look for common names in Workspace
     local names = {"Booths", "PlayerBooths", "TradingBooths", "Stands", "PlayerStands", "ActiveBooths", "Marketplace", "FarmersMarket", "FarmerMarket"}
     for _, name in ipairs(names) do
         local obj = Workspace:FindFirstChild(name)
@@ -195,7 +348,6 @@ local function getBoothsFolder()
         end
     end
     
-    -- Fallback search of workspace children
     for _, child in ipairs(Workspace:GetChildren()) do
         if child:IsA("Folder") or child:IsA("Model") then
             local lowerName = string.lower(child.Name)
@@ -209,13 +361,11 @@ end
 
 -- Find Booth Owner Name
 local function getBoothOwner(booth)
-    -- Check common attributes
     local ownerAttr = booth:GetAttribute("Owner") or booth:GetAttribute("OwnerName") or booth:GetAttribute("Player") or booth:GetAttribute("ClaimedBy")
     if ownerAttr then
         return tostring(ownerAttr)
     end
     
-    -- Check child values
     local ownerVal = booth:FindFirstChild("Owner") or booth:FindFirstChild("OwnerName") or booth:FindFirstChild("Player") or booth:FindFirstChild("ClaimedBy")
     if ownerVal then
         if ownerVal:IsA("StringValue") then
@@ -225,15 +375,13 @@ local function getBoothOwner(booth)
         end
     end
     
-    -- If booth name matches a current player, use that
     local name = booth.Name
     if Players:FindFirstChild(name) then
         return name
     end
     
-    -- Fallback: Check inside SurfaceGui/BillboardGui for text labels containing Owner or Usernames
     for _, gui in ipairs(booth:GetDescendants()) do
-        if gui:IsA("SurfaceGui") or gui:IsA("BillboardGui") then
+        if gui:IsA("BillboardGui") or gui:IsA("SurfaceGui") then
             for _, label in ipairs(gui:GetDescendants()) do
                 if label:IsA("TextLabel") or label:IsA("TextBox") then
                     local text = label.Text
@@ -249,11 +397,25 @@ local function getBoothOwner(booth)
     return "Unknown"
 end
 
+-- Parse Pet Name and Weight (Heuristic regex)
+local function parsePetName(itemName)
+    -- Match "Orange Tabby [5.2kg]" or "Orange Tabby (5.2kg)" or "Orange Tabby 5.2kg"
+    local species, weightStr = string.match(itemName, "^(.-)%s*[%[%(]%s*([%d%.]+)%s*kg%s*[%]%)]")
+    if not species then
+        species, weightStr = string.match(itemName, "^(.-)%s*([%d%.]+)%s*kg")
+    end
+    
+    if species and weightStr then
+        species = string.gsub(species, "^%s*(.-)%s*$", "%1") -- trim spaces
+        return species, tonumber(weightStr)
+    end
+    
+    return itemName, nil
+end
+
 -- Find Booth Items
 local function getBoothItems(booth)
     local items = {}
-    
-    -- Check common folder names
     local folders = {"Items", "Selling", "ListedItems", "Products", "Goods", "List"}
     local itemFolder = nil
     for _, name in ipairs(folders) do
@@ -291,7 +453,6 @@ local function getBoothItems(booth)
         end
     end
     
-    -- Fallback: If no structured items folder was found, parse the SurfaceGui/BillboardGui labels
     if #items == 0 then
         for _, gui in ipairs(booth:GetDescendants()) do
             if gui:IsA("SurfaceGui") or gui:IsA("BillboardGui") then
@@ -341,25 +502,77 @@ local function teleportTo(position)
     if char then
         local root = char:FindFirstChild("HumanoidRootPart")
         if root then
-            -- Offset teleportation slightly so the player lands on their feet
             root.CFrame = position + Vector3.new(0, 4.5, 0)
         end
     end
 end
 
+-- Check if item passes the filters (Auto List vs Standard Search)
+local function passesFilters(item, name, price)
+    local species, weight = parsePetName(name)
+    
+    if autoListEnabled then
+        -- We only care about pets (must have weight)
+        if not weight then
+            return false
+        end
+        
+        -- Filter species
+        if selectedPetType ~= "Any" and string.lower(species) ~= string.lower(selectedPetType) then
+            return false
+        end
+        
+        -- Filter min weight
+        local minW = tonumber(MinWeightInput.Text)
+        if minW and weight < minW then
+            return false
+        end
+        
+        -- Filter max weight
+        local maxW = tonumber(MaxWeightInput.Text)
+        if maxW and weight > maxW then
+            return false
+        end
+        
+        -- Filter max price
+        local maxP = tonumber(MaxPriceInput.Text)
+        if maxP and price > maxP then
+            return false
+        end
+        
+        return true
+    else
+        -- Standard Search Bar filter
+        local filter = SearchInput.Text
+        if not filter or filter == "" then
+            return true
+        end
+        return string.find(string.lower(name), string.lower(filter)) or string.find(string.lower(item.Seller), string.lower(filter))
+    end
+end
+
+-- Notify User
+local function notify(title, text)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {
+            Title = title,
+            Text = text,
+            Duration = 5
+        })
+    end)
+end
+
 -- Render the Items in UI
-local function renderItems(filter)
-    -- Clear current rendered items
+local function renderItems()
     for _, child in ipairs(ScrollFrame:GetChildren()) do
         if child:IsA("Frame") then
             child:Destroy()
         end
     end
     
-    -- Filter and display
     local count = 0
     for _, item in ipairs(allItems) do
-        if not filter or filter == "" or string.find(string.lower(item.Name), string.lower(filter)) or string.find(string.lower(item.Seller), string.lower(filter)) then
+        if passesFilters(item, item.Name, item.Price) then
             count = count + 1
             
             -- Create Card Frame
@@ -385,7 +598,7 @@ local function renderItems(filter)
             NameLabel.TextXAlignment = Enum.TextXAlignment.Left
             NameLabel.Parent = Card
             
-            -- Seller/Booth Owner Label
+            -- Seller Label
             local SellerLabel = Instance.new("TextLabel")
             SellerLabel.Name = "Seller"
             SellerLabel.Size = UDim2.new(0.65, 0, 0.4, 0)
@@ -425,7 +638,6 @@ local function renderItems(filter)
             addCorner(TeleportBtn, 6)
             addStroke(TeleportBtn, Color3.fromRGB(138, 35, 135), 1, 0.6)
             
-            -- Teleport button click event
             TeleportBtn.MouseButton1Click:Connect(function()
                 teleportTo(item.Position)
             end)
@@ -439,15 +651,21 @@ local function scanBooths()
     local boothsFolder = getBoothsFolder()
     
     if not boothsFolder then
-        warn("Booths folder not found!")
+        StatusLabel.Text = "Status: Booths folder not found!"
         return
     end
     
+    if autoListEnabled then
+        StatusLabel.Text = "Status: Scanning server for filtered pets..."
+    else
+        StatusLabel.Text = "Status: Idle"
+    end
+    
+    local currentActiveListings = {}
+    
     for _, booth in ipairs(boothsFolder:GetChildren()) do
-        -- Booths must be Models or Parts
         if booth:IsA("Model") or booth:IsA("BasePart") then
             local owner = getBoothOwner(booth)
-            -- Only scan claimed booths
             if owner and owner ~= "Unknown" and owner ~= "" then
                 local position = booth:IsA("Model") and (booth.PrimaryPart and booth.PrimaryPart.Position or booth:FindFirstChildWhichIsA("BasePart") and booth:FindFirstChildWhichIsA("BasePart").Position) or booth.Position
                 if position then
@@ -460,17 +678,48 @@ local function scanBooths()
                             Seller = owner,
                             Position = position
                         })
+                        
+                        -- Tracking active matching items for notifications
+                        if autoListEnabled and passesFilters({Seller = owner}, item.Name, item.Price) then
+                            local listingKey = owner .. "_" .. item.Name .. "_" .. item.Price
+                            currentActiveListings[listingKey] = true
+                            
+                            if not notifiedListings[listingKey] then
+                                notifiedListings[listingKey] = true
+                                notify("Matching Pet Found!", owner .. " is selling: " .. item.Name .. " for " .. item.Price .. " Tokens!")
+                            end
+                        end
                     end
                 end
             end
         end
     end
     
-    -- Re-render list with current search filter
-    renderItems(SearchInput.Text)
+    -- Cleanup notified listings that are no longer active in the marketplace
+    for key in pairs(notifiedListings) do
+        if not currentActiveListings[key] then
+            notifiedListings[key] = nil
+        end
+    end
+    
+    renderItems()
 end
 
--- Connect Events
+-- Auto-List Background Loop Handler
+local function startAutoListLoop()
+    if autoListLoopActive then return end
+    autoListLoopActive = true
+    task.spawn(function()
+        while autoListEnabled do
+            scanBooths()
+            task.wait(4)
+        end
+        autoListLoopActive = false
+        StatusLabel.Text = "Status: Idle"
+    end)
+end
+
+-- Connect UI Events
 RefreshBtn.MouseButton1Click:Connect(function()
     scanBooths()
 end)
@@ -488,22 +737,55 @@ ToggleButton.MouseButton1Click:Connect(function()
     scanBooths()
 end)
 
+DropdownBtn.MouseButton1Click:Connect(function()
+    DropdownMenu.Visible = not DropdownMenu.Visible
+end)
+
+-- Toggle Auto-List Handler
+ToggleAutoListBtn.MouseButton1Click:Connect(function()
+    autoListEnabled = not autoListEnabled
+    if autoListEnabled then
+        ToggleAutoListBtn.Text = "Auto List Pets: ON"
+        ToggleAutoListBtn.BackgroundColor3 = Color3.fromRGB(46, 204, 113) -- Green
+        SearchContainer.Visible = false -- Hide standard search when auto list is active
+        ScrollFrame.Position = UDim2.new(0, 15, 0, 195)
+        ScrollFrame.Size = UDim2.new(1, -30, 1, -210)
+        startAutoListLoop()
+    else
+        ToggleAutoListBtn.Text = "Auto List Pets: OFF"
+        ToggleAutoListBtn.BackgroundColor3 = Color3.fromRGB(233, 64, 87) -- Red
+        SearchContainer.Visible = true
+        ScrollFrame.Position = UDim2.new(0, 15, 0, 240)
+        ScrollFrame.Size = UDim2.new(1, -30, 1, -255)
+        scanBooths()
+    end
+end)
+
+-- Re-filter when text inputs change
 SearchInput:GetPropertyChangedSignal("Text"):Connect(function()
-    renderItems(SearchInput.Text)
+    if not autoListEnabled then
+        renderItems()
+    end
+end)
+
+MinWeightInput:GetPropertyChangedSignal("Text"):Connect(function()
+    if autoListEnabled then
+        renderItems()
+    end
+end)
+
+MaxWeightInput:GetPropertyChangedSignal("Text"):Connect(function()
+    if autoListEnabled then
+        renderItems()
+    end
+end)
+
+MaxPriceInput:GetPropertyChangedSignal("Text"):Connect(function()
+    if autoListEnabled then
+        renderItems()
+    end
 end)
 
 -- Initial Scan
 scanBooths()
-
--- Notify User
-local function notify(title, text)
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = title,
-            Text = text,
-            Duration = 5
-        })
-    end)
-end
-
 notify("[PonggoHub]", "Market Scanner loaded successfully!")
