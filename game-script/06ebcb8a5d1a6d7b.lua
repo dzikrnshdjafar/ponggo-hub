@@ -4,6 +4,7 @@
 local Players = game:GetService("Players")
 local Workspace = game:GetService("Workspace")
 local TweenService = game:GetService("TweenService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local LocalPlayer = Players.LocalPlayer
 
 -- Check if UI already exists and destroy it
@@ -194,14 +195,14 @@ DropdownBtn.Parent = PetFinderPanel
 addCorner(DropdownBtn, 6)
 addStroke(DropdownBtn, Color3.fromRGB(255, 255, 255), 1, 0.9)
 
--- Dropdown Scrolling Frame Menu
+-- Dropdown Scrolling Frame Menu (ZIndex layered above main elements)
 local DropdownMenu = Instance.new("ScrollingFrame")
 DropdownMenu.Name = "DropdownMenu"
 DropdownMenu.Size = UDim2.new(0, 180, 0, 150)
 DropdownMenu.Position = UDim2.new(0, 10, 0, 85)
 DropdownMenu.BackgroundColor3 = Color3.fromRGB(28, 28, 40)
 DropdownMenu.BorderSizePixel = 0
-DropdownMenu.ZIndex = 20
+DropdownMenu.ZIndex = 30
 DropdownMenu.Visible = false
 DropdownMenu.ScrollBarThickness = 4
 DropdownMenu.ScrollBarImageColor3 = Color3.fromRGB(138, 35, 135)
@@ -260,36 +261,6 @@ StatusLabel.TextColor3 = Color3.fromRGB(160, 160, 180)
 StatusLabel.TextSize = 11
 StatusLabel.Font = Enum.Font.GothamBold
 StatusLabel.Parent = PetFinderPanel
-
--- Populate Dropdown List
-local petTypes = {"Any", "Orange Tabby", "Rooster", "Pig", "Cow", "Sheep", "Chicken", "Bunny", "Goat", "Cat", "Dog", "Axolotl", "Duck", "Frog", "Bee", "Turtle"}
-
-for _, petType in ipairs(petTypes) do
-    local btn = Instance.new("TextButton")
-    btn.Size = UDim2.new(1, 0, 0, 28)
-    btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-    btn.Text = petType
-    btn.TextColor3 = Color3.fromRGB(255, 255, 255)
-    btn.Font = Enum.Font.Gotham
-    btn.TextSize = 12
-    btn.ZIndex = 25
-    btn.Parent = DropdownMenu
-    addCorner(btn, 4)
-    
-    btn.MouseEnter:Connect(function()
-        btn.BackgroundColor3 = Color3.fromRGB(138, 35, 135)
-    end)
-    btn.MouseLeave:Connect(function()
-        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
-    end)
-    
-    btn.MouseButton1Click:Connect(function()
-        selectedPetType = petType
-        DropdownBtn.Text = "Pet Type: " .. petType
-        DropdownMenu.Visible = false
-        scanBooths()
-    end)
-end
 
 -- Search Bar Container
 local SearchContainer = Instance.new("Frame")
@@ -397,9 +368,15 @@ local function getBoothOwner(booth)
     return "Unknown"
 end
 
--- Parse Pet Name and Weight (Heuristic regex)
+-- Extract Weight (e.g. 5.2kg or Weight: 5.2)
+local function extractWeightFromText(text)
+    local wt = string.match(text, "([%d%.]+)%s*kg") or string.match(text, "Weight:%s*([%d%.]+)") or string.match(text, "Wt:%s*([%d%.]+)")
+    return tonumber(wt)
+end
+
+-- Parse Pet Name and Weight
 local function parsePetName(itemName)
-    -- Match "Orange Tabby [5.2kg]" or "Orange Tabby (5.2kg)" or "Orange Tabby 5.2kg"
+    -- Try to match weight from name string first
     local species, weightStr = string.match(itemName, "^(.-)%s*[%[%(]%s*([%d%.]+)%s*kg%s*[%]%)]")
     if not species then
         species, weightStr = string.match(itemName, "^(.-)%s*([%d%.]+)%s*kg")
@@ -431,6 +408,7 @@ local function getBoothItems(booth)
             local name = item.Name
             local price = item:GetAttribute("Price") or item:GetAttribute("Cost")
             local quantity = item:GetAttribute("Quantity") or item:GetAttribute("Amount") or 1
+            local weight = item:GetAttribute("Weight") or item:GetAttribute("PetWeight") or item:GetAttribute("HatchWeight")
             
             if not price then
                 local priceVal = item:FindFirstChild("Price") or item:FindFirstChild("Cost")
@@ -444,25 +422,49 @@ local function getBoothItems(booth)
                     quantity = qtyVal.Value
                 end
             end
+            if not weight then
+                local wVal = item:FindFirstChild("Weight") or item:FindFirstChild("PetWeight") or item:FindFirstChild("HatchWeight")
+                if wVal and wVal:IsA("ValueBase") then
+                    weight = wVal.Value
+                end
+            end
+            
+            -- If we have a parsed weight or attribute, let's reconstruct the name cleanly
+            local cleanName = name
+            local species, parsedWeight = parsePetName(name)
+            local finalWeight = weight or parsedWeight
+            
+            if finalWeight then
+                cleanName = species .. " [" .. finalWeight .. "kg]"
+            end
             
             table.insert(items, {
-                Name = name,
+                Name = cleanName,
                 Price = tonumber(price) or 0,
-                Quantity = tonumber(quantity) or 1
+                Quantity = tonumber(quantity) or 1,
+                Weight = finalWeight
             })
         end
     end
     
+    -- Fallback: Scan GUI text elements inside the booth
     if #items == 0 then
         for _, gui in ipairs(booth:GetDescendants()) do
             if gui:IsA("SurfaceGui") or gui:IsA("BillboardGui") then
                 for _, frame in ipairs(gui:GetDescendants()) do
                     if frame:IsA("Frame") or frame:IsA("ImageLabel") then
-                        local nameLabel, priceLabel, qtyLabel = nil, nil, nil
+                        local nameLabel, priceLabel, qtyLabel, weightLabel = nil, nil, nil, nil
+                        local foundWeightVal = nil
+                        
                         for _, child in ipairs(frame:GetChildren()) do
                             if child:IsA("TextLabel") then
                                 local text = child.Text
-                                if string.find(text, "^x%d+$") or string.find(text, "^%d+x$") then
+                                local extractedWt = extractWeightFromText(text)
+                                
+                                if extractedWt then
+                                    foundWeightVal = extractedWt
+                                    weightLabel = child
+                                elseif string.find(text, "^x%d+$") or string.find(text, "^%d+x$") then
                                     qtyLabel = child
                                 elseif string.match(text, "^%d+$") or string.find(text, "Token") or string.find(text, "%$") then
                                     priceLabel = child
@@ -481,10 +483,19 @@ local function getBoothItems(booth)
                             local qtyText = qtyLabel and qtyLabel.Text or "1"
                             local qtyNum = tonumber(string.match(qtyText, "%d+")) or 1
                             
+                            local species, parsedWeight = parsePetName(itemName)
+                            local finalWeight = foundWeightVal or parsedWeight
+                            local cleanName = itemName
+                            
+                            if finalWeight then
+                                cleanName = species .. " [" .. finalWeight .. "kg]"
+                            end
+                            
                             table.insert(items, {
-                                Name = itemName,
+                                Name = cleanName,
                                 Price = priceNum,
-                                Quantity = qtyNum
+                                Quantity = qtyNum,
+                                Weight = finalWeight
                             })
                         end
                     end
@@ -507,13 +518,114 @@ local function teleportTo(position)
     end
 end
 
+-- Dynamic Pet Types Gatherer
+local function getDynamicPetTypes()
+    local types = {"Any"}
+    local found = {}
+    
+    local function addType(name)
+        if name and name ~= "" and not found[name] then
+            -- Exclude common noise names
+            if name ~= "List" and name ~= "Selling" and name ~= "Config" and name ~= "Remotes" and name ~= "Events" and name ~= "Items" then
+                found[name] = true
+                table.insert(types, name)
+            end
+        end
+    end
+    
+    -- 1. Scan ReplicatedStorage folders
+    pcall(function()
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj:IsA("Folder") then
+                local folderName = string.lower(obj.Name)
+                if folderName == "pets" or folderName == "petmodels" or folderName == "petassets" or folderName == "petconfigs" then
+                    for _, child in ipairs(obj:GetChildren()) do
+                        addType(child.Name)
+                    end
+                end
+            end
+        end
+    end)
+    
+    -- 2. Scan ReplicatedStorage ModuleScripts / Configs
+    pcall(function()
+        for _, obj in ipairs(ReplicatedStorage:GetDescendants()) do
+            if obj:IsA("ModuleScript") then
+                local lowerName = string.lower(obj.Name)
+                if string.find(lowerName, "pet") and not string.find(lowerName, "controller") and not string.find(lowerName, "client") and not string.find(lowerName, "server") then
+                    local data = require(obj)
+                    if type(data) == "table" then
+                        for k, v in pairs(data) do
+                            if type(k) == "string" then
+                                addType(k)
+                            elseif type(v) == "table" and type(v.Name) == "string" then
+                                addType(v.Name)
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end)
+    
+    -- 3. Scan active booths currently on server
+    local boothsFolder = getBoothsFolder()
+    if boothsFolder then
+        for _, booth in ipairs(boothsFolder:GetChildren()) do
+            local items = getBoothItems(booth)
+            for _, item in ipairs(items) do
+                local species, _ = parsePetName(item.Name)
+                local nameLower = string.lower(item.Name)
+                -- If it's not seed/fertilizer/cosmetics, treat as pet type candidate
+                if not string.find(nameLower, "seed") and not string.find(nameLower, "fertilizer") and not string.find(nameLower, "water") and not string.find(nameLower, "token") and not string.find(nameLower, "booth") and not string.find(nameLower, "skin") then
+                    addType(species)
+                end
+            end
+        end
+    end
+    
+    -- 4. Fallback defaults if none detected
+    if #types <= 1 then
+        local defaults = {"Orange Tabby", "Rooster", "Pig", "Cow", "Sheep", "Chicken", "Bunny", "Goat", "Cat", "Dog", "Axolotl", "Duck", "Frog", "Bee", "Turtle"}
+        for _, d in ipairs(defaults) do
+            addType(d)
+        end
+    end
+    
+    -- Sort alphabetically
+    table.sort(types, function(a, b)
+        if a == "Any" then return true end
+        if b == "Any" then return false end
+        return a < b
+    end)
+    
+    return types
+end
+
+-- Check if species matches any of the dynamic pet types
+local function isPet(itemName)
+    local species = parsePetName(itemName)
+    local petTypes = getDynamicPetTypes()
+    for _, t in ipairs(petTypes) do
+        if t ~= "Any" and string.lower(species) == string.lower(t) then
+            return true
+        end
+    end
+    -- Fallback: If itemName contains "kg", we automatically classify it as a pet
+    if string.find(string.lower(itemName), "kg") then
+        return true
+    end
+    return false
+end
+
 -- Check if item passes the filters (Auto List vs Standard Search)
-local function passesFilters(item, name, price)
-    local species, weight = parsePetName(name)
+local function passesFilters(item, name, price, weight)
+    local species, parsedWeight = parsePetName(name)
+    local finalWeight = weight or parsedWeight
     
     if autoListEnabled then
-        -- We only care about pets (must have weight)
-        if not weight then
+        -- Must be a pet
+        if not isPet(name) then
             return false
         end
         
@@ -522,19 +634,23 @@ local function passesFilters(item, name, price)
             return false
         end
         
-        -- Filter min weight
+        -- Filter min weight (only if input is specified)
         local minW = tonumber(MinWeightInput.Text)
-        if minW and weight < minW then
-            return false
+        if minW then
+            if not finalWeight or finalWeight < minW then
+                return false
+            end
         end
         
-        -- Filter max weight
+        -- Filter max weight (only if input is specified)
         local maxW = tonumber(MaxWeightInput.Text)
-        if maxW and weight > maxW then
-            return false
+        if maxW then
+            if not finalWeight or finalWeight > maxW then
+                return false
+            end
         end
         
-        -- Filter max price
+        -- Filter max price (only if input is specified)
         local maxP = tonumber(MaxPriceInput.Text)
         if maxP and price > maxP then
             return false
@@ -551,17 +667,6 @@ local function passesFilters(item, name, price)
     end
 end
 
--- Notify User
-local function notify(title, text)
-    pcall(function()
-        game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = title,
-            Text = text,
-            Duration = 5
-        })
-    end)
-end
-
 -- Render the Items in UI
 local function renderItems()
     for _, child in ipairs(ScrollFrame:GetChildren()) do
@@ -572,7 +677,7 @@ local function renderItems()
     
     local count = 0
     for _, item in ipairs(allItems) do
-        if passesFilters(item, item.Name, item.Price) then
+        if passesFilters(item, item.Name, item.Price, item.Weight) then
             count = count + 1
             
             -- Create Card Frame
@@ -676,11 +781,12 @@ local function scanBooths()
                             Price = item.Price,
                             Quantity = item.Quantity,
                             Seller = owner,
-                            Position = position
+                            Position = position,
+                            Weight = item.Weight
                         })
                         
                         -- Tracking active matching items for notifications
-                        if autoListEnabled and passesFilters({Seller = owner}, item.Name, item.Price) then
+                        if autoListEnabled and passesFilters({Seller = owner}, item.Name, item.Price, item.Weight) then
                             local listingKey = owner .. "_" .. item.Name .. "_" .. item.Price
                             currentActiveListings[listingKey] = true
                             
@@ -703,6 +809,43 @@ local function scanBooths()
     end
     
     renderItems()
+end
+
+-- Populate Dropdown List dynamically
+local function updateDropdownOptions()
+    for _, child in ipairs(DropdownMenu:GetChildren()) do
+        if child:IsA("TextButton") then
+            child:Destroy()
+        end
+    end
+    
+    local petTypes = getDynamicPetTypes()
+    for _, petType in ipairs(petTypes) do
+        local btn = Instance.new("TextButton")
+        btn.Size = UDim2.new(1, 0, 0, 28)
+        btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        btn.Text = petType
+        btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+        btn.Font = Enum.Font.Gotham
+        btn.TextSize = 12
+        btn.ZIndex = 35
+        btn.Parent = DropdownMenu
+        addCorner(btn, 4)
+        
+        btn.MouseEnter:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(138, 35, 135)
+        end)
+        btn.MouseLeave:Connect(function()
+            btn.BackgroundColor3 = Color3.fromRGB(30, 30, 42)
+        end)
+        
+        btn.MouseButton1Click:Connect(function()
+            selectedPetType = petType
+            DropdownBtn.Text = "Pet Type: " .. petType
+            DropdownMenu.Visible = false
+            scanBooths()
+        end)
+    end
 end
 
 -- Auto-List Background Loop Handler
@@ -739,6 +882,9 @@ end)
 
 DropdownBtn.MouseButton1Click:Connect(function()
     DropdownMenu.Visible = not DropdownMenu.Visible
+    if DropdownMenu.Visible then
+        updateDropdownOptions()
+    end
 end)
 
 -- Toggle Auto-List Handler
