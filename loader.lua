@@ -6,7 +6,7 @@ local function notify(title, message, duration)
     duration = duration or 6
     pcall(function()
         game:GetService("StarterGui"):SetCore("SendNotification", {
-            Title = "[PandoraHub] " .. tostring(title),
+            Title = "[PonggoHub] " .. tostring(title),
             Text = tostring(message),
             Duration = duration,
         })
